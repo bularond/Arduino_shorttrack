@@ -16,6 +16,9 @@
 #define ACTIVE_BOTTOM
 #define CONF_LINE
 
+//#define DATA_DEBUG
+#define MOVE_DEFINE
+
 //Минимальные и максимальные значения поля 
 int minArr[8] = {21, 24, 24, 22, 24, 22, 23, 27};
 int maxArr[8] = {960, 964, 964, 954, 954, 948, 934, 935};
@@ -65,7 +68,7 @@ void motor(bool directoin_left, byte speed_left, bool direction_right, byte spee
 #define mx 255B
 #define mn 0
 
-int speed = 160;
+int speed = 80;
 float  kp = 1.24;
 float  kd = 3.0;
 float  ki = 1.0;
@@ -99,8 +102,18 @@ float pid(float error)
     return up + ud + ui;
 }
 
-void move(float change){
-    motor(1, low_speed - change, 1, low_speed + change);
+void move(float regulator){
+    float turn_left  =  min(max(speed * (1 - regulator), 0), 255);
+    float turn_right =  min(max(speed * (1 + regulator), 0), 255);
+    
+    motor(1, turn_left, 1, turn_right);
+
+    #ifdef MOVE_DEFINE
+    Serial.print(turn_left);
+    Serial.print(' ');
+    Serial.print(turn_right);
+    Serial.print('\n');
+    #endif
 }
 
 ///////////////////////////////   ДАТЧИКИ   ///////////////////////////////////////
@@ -116,6 +129,14 @@ void upd_data()
         int znam  = min(max(maxArr[i] - minArr[i], 0), 1000);
         data[i] = 1000.0 * chisl / znam;
     }
+    #endif
+
+    #ifdef DATA_DEBUG
+    for(int i = 0; i < 8; i++){
+        Serial.print(data[i]);
+        Serial.print(' ');
+    }
+    Serial.print('\n');
     #endif
 }
 
@@ -142,7 +163,7 @@ float braking_cof = 0.0;
 void loop()
 {
     #ifdef ACTIVE_BOTTOM
-    if (!digitalRead(BUTTON_PIN)){
+    if (digitalRead(BUTTON_PIN)){
         braking_cof += 0.13;
         low_speed = min(speed, speed * braking_cof*braking_cof);
     }
