@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <SoftwareSerial.h>
 
 #define M1 4
 #define M2 3
@@ -15,9 +16,10 @@
 
 #define ACTIVE_BOTTOM
 #define CONF_LINE
+#define ACTIVE_BLUETOUTH
 
-//#define DATA_DEBUG
-#define MOVE_DEFINE
+bool DATA_DEBUG = false;
+bool MOVE_DEFINE = false;
 
 //Минимальные и максимальные значения поля 
 int minArr[8] = {21, 24, 24, 22, 24, 22, 23, 27};
@@ -32,6 +34,10 @@ float new_irr_part = 1 / 20;
 
 byte line[8] = {A7, A6, A5, A4, A3, A2, A1, A0};
 
+#ifdef ACTIVE_BLUETOUTH
+#define Serial bt
+SoftwareSerial bt(11, 12);
+#endif
 
 ///////////////////////////////////      МОТОР    /////////////////////////////
 
@@ -74,7 +80,7 @@ float  kd = 3.0;
 float  ki = 1.0;
 
 float old_error = 0, hist_error = 0;
-float low_speed = speed;
+float now_speed = speed;
 
 float get_error()
 {
@@ -103,17 +109,17 @@ float pid(float error)
 }
 
 void move(float regulator){
-    float turn_left  =  min(max(speed * (1 - regulator), 0), 255);
-    float turn_right =  min(max(speed * (1 + regulator), 0), 255);
+    float turn_left  =  min(max(now_speed * (1 - regulator), 0), 255);
+    float turn_right =  min(max(now_speed * (1 + regulator), 0), 255);
     
     motor(1, turn_left, 1, turn_right);
 
-    #ifdef MOVE_DEFINE
-    Serial.print(turn_left);
-    Serial.print(' ');
-    Serial.print(turn_right);
-    Serial.print('\n');
-    #endif
+    if(MOVE_DEFINE){
+        Serial.print(turn_left);
+        Serial.print(' ');
+        Serial.print(turn_right);
+        Serial.print('\n');
+    }
 }
 
 ///////////////////////////////   ДАТЧИКИ   ///////////////////////////////////////
@@ -131,15 +137,102 @@ void upd_data()
     }
     #endif
 
-    #ifdef DATA_DEBUG
-    for(int i = 0; i < 8; i++){
-        Serial.print(data[i]);
-        Serial.print(' ');
+    if(DATA_DEBUG){
+        for(int i = 0; i < 8; i++){
+            Serial.print(data[i]);
+            Serial.print(' ');
+        }
+        Serial.print('\n');
     }
-    Serial.print('\n');
-    #endif
 }
 
+///////////////////////////////////   BLUETOUTH /////////////////////////////////
+
+int menu = 0;
+String input;
+
+float string_to_float(String st, int beg = 0){
+    st.remove(0, beg);
+    return st.toFloat();
+}
+
+void interface(){
+    if(Serial.available()){
+        input = Serial.readString();
+        switch (input[0])
+        { 
+        case 'p':
+            if(input[1] == '+')
+                kp += 0.1;
+            else if(input[1] == '-')
+                kp -= 0.1;
+            else
+                kp = string_to_float(input, 1);
+            bt.println(kp);
+            break;
+        case 'd':
+            if(input[1] == '+')
+                kd += 0.1;
+            else if(input[1] == '-')
+                kd -= 0.1;
+            else
+                kd = string_to_float(input, 1);
+            bt.println(kd);
+            break;
+        case 'i':
+            if(input[1] == '+')
+                ki += 0.1;
+            else if(input[1] == '-')
+                ki -= 0.1;
+            else
+                ki = string_to_float(input, 1);
+            bt.println(ki);
+            break;
+        case 's':
+            if(input[1] == '+')
+                speed += 0.1;
+            else if(input[1] == '-')
+                speed -= 0.1;
+            else
+                speed = string_to_float(input, 1);
+            bt.println(speed);
+            break;
+        case 'c':
+            if(now_speed == 0)
+                now_speed = speed;
+            else
+                now_speed = 0;
+            break;
+        case '1':
+            motor(1, 100, 1, 100);
+            delay(int(string_to_float(input, 1)));
+            break;
+        case '2':
+            motor(0, 100, 0, 100);
+            delay(int(string_to_float(input, 1)));
+            break;
+        case '3':
+            motor(0, 100, 1, 100);
+            delay(int(string_to_float(input, 1)));
+            break;
+        case '4':
+            motor(1, 100, 0, 100);
+            delay(int(string_to_float(input, 1)));
+            break;
+        case 'g':
+            Serial.print(kp);
+            Serial.print(' ');
+            Serial.print(kd);
+            Serial.print(' ');
+            Serial.print(ki);
+            Serial.print(' ');
+            Serial.print(speed);
+            Serial.print('\n');
+        default:
+            break;
+        }
+    }
+}
 ///////////////////////////////////   ОБЩАЯ   ///////////////////////////////////
 
 void setup()
@@ -151,7 +244,7 @@ void setup()
     pinMode(S1, OUTPUT);
     pinMode(S2, OUTPUT);
     Serial.begin(9600);
-    
+
     #ifdef ACTIVE_BOTTOM
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     while (digitalRead(BUTTON_PIN));
@@ -162,17 +255,7 @@ float braking_cof = 0.0;
 
 void loop()
 {
-    #ifdef ACTIVE_BOTTOM
-    if (digitalRead(BUTTON_PIN)){
-        braking_cof += 0.13;
-        low_speed = min(speed, speed * braking_cof*braking_cof);
-    }
-    else{
-        low_speed = 0;
-        braking_cof = 0.0;
-    }
-    #endif
-
+    interface();
     upd_data();
     move(pid(get_error()));
 }
