@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SoftwareSerial.h>
+#include <EEPROM.h>
 
 #define M1 4
 #define M2 3
@@ -17,9 +18,10 @@
 #define ACTIVE_BOTTOM
 #define CONF_LINE
 #define ACTIVE_BLUETOUTH
+#define ENABLE_EEPROM
 
 bool DATA_DEBUG = false;
-bool MOVE_DEFINE = false;
+bool MOVE_DEBUG = false;
 
 //Минимальные и максимальные значения поля 
 int minArr[8] = {21, 24, 24, 22, 24, 22, 23, 27};
@@ -69,6 +71,31 @@ void motor(bool directoin_left, byte speed_left, bool direction_right, byte spee
     }
 }
 
+
+///////////////////////////////   ДАТЧИКИ   ///////////////////////////////////////
+
+void upd_data()
+{
+    for (int i = 0; i < 8; i++)
+        data[i] = analogRead(line[i]);
+
+    #ifdef CONF_LINE
+    for(int i=0; i<8; i++){
+        int chisl = min(max(data[i] - minArr[i],   0), 1000);
+        int znam  = min(max(maxArr[i] - minArr[i], 0), 1000);
+        data[i] = 1000.0 * chisl / znam;
+    }
+    #endif
+
+    if(DATA_DEBUG){
+        for(int i = 0; i < 8; i++){
+            Serial.print(data[i]);
+            Serial.print(' ');
+        }
+        Serial.print('\n');
+    }
+}
+
 ///////////////////////////////////   АВТОПИЛОТ  //////////////////////////////
 
 #define mx 255B
@@ -81,6 +108,17 @@ float  ki = 1.0;
 
 float old_error = 0, hist_error = 0;
 float now_speed = speed;
+
+void search(byte direction)
+{
+    motor(direction ^ 1, 100, direction, 100);
+    while(true){
+        upd_data();
+        for(int i = 0; i < 8; i++)
+            if(data[i] > 300)
+                break;
+    }
+}
 
 float get_error()
 {
@@ -109,40 +147,28 @@ float pid(float error)
 }
 
 void move(float regulator){
-    float turn_left  =  min(max(now_speed * (1 - regulator), 0), 255);
-    float turn_right =  min(max(now_speed * (1 + regulator), 0), 255);
-    
-    motor(1, turn_left, 1, turn_right);
+    bool flag = false;
+    for(int i = 0; i < 8; i++)
+        if(data[i] > 300)
+            flag = true;
+    if(flag){
+        float turn_left  =  min(max(now_speed * (1 - regulator), 0), 255);
+        float turn_right =  min(max(now_speed * (1 + regulator), 0), 255);
 
-    if(MOVE_DEFINE){
-        Serial.print(turn_left);
-        Serial.print(' ');
-        Serial.print(turn_right);
-        Serial.print('\n');
-    }
-}
+        motor(1, turn_left, 1, turn_right);
 
-///////////////////////////////   ДАТЧИКИ   ///////////////////////////////////////
-
-void upd_data()
-{
-    for (int i = 0; i < 8; i++)
-        data[i] = analogRead(line[i]);
-
-    #ifdef CONF_LINE
-    for(int i=0; i<8; i++){
-        int chisl = min(max(data[i] - minArr[i],   0), 1000);
-        int znam  = min(max(maxArr[i] - minArr[i], 0), 1000);
-        data[i] = 1000.0 * chisl / znam;
-    }
-    #endif
-
-    if(DATA_DEBUG){
-        for(int i = 0; i < 8; i++){
-            Serial.print(data[i]);
+        if(MOVE_DEBUG){
+            Serial.print(turn_left);
             Serial.print(' ');
+            Serial.print(turn_right);
+            Serial.print('\n');
         }
-        Serial.print('\n');
+    }
+    else{
+        if(hist_error < 0)
+            search(0);
+        else
+            search(1);
     }
 }
 
@@ -244,6 +270,10 @@ void setup()
     pinMode(S1, OUTPUT);
     pinMode(S2, OUTPUT);
     Serial.begin(9600);
+
+    #ifdef ENABLE_EEPROM
+    
+    #endif
 
     #ifdef ACTIVE_BOTTOM
     pinMode(BUTTON_PIN, INPUT_PULLUP);
