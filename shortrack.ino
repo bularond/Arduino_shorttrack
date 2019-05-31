@@ -15,7 +15,7 @@
 
 ///////////////////////////////////   КОНФИГУРАЦИЯ  /////////////////////////
 
-#define ACTIVE_BOTTOM
+//#define ACTIVE_BOTTOM
 #define CONF_LINE
 #define ACTIVE_BLUETOUTH
 #define ENABLE_EEPROM
@@ -102,21 +102,23 @@ void upd_data()
 #define mn 0
 
 int speed = 80;
-float  kp = 1.24;
+float  kp = 1.25;
 float  kd = 3.0;
-float  ki = 1.0;
+float  ki = 4.0;
 
 float old_error = 0, hist_error = 0;
 float now_speed = speed;
 
 void search(byte direction)
 {
-    motor(direction ^ 1, 100, direction, 100);
-    while(true){
+    motor(direction ^ 1, 120, direction, 120);
+    int cnt = 0;
+    while(cnt < 2){
+        cnt = 0;
         upd_data();
         for(int i = 0; i < 8; i++)
             if(data[i] > 300)
-                break;
+                cnt++;
     }
 }
 
@@ -146,29 +148,46 @@ float pid(float error)
     return up + ud + ui;
 }
 
-void move(float regulator){
-    bool flag = false;
+int last_dir = 0;
+
+void move(float regulator)
+{
+    int sum = 0, cnt = 0;
     for(int i = 0; i < 8; i++)
         if(data[i] > 300)
-            flag = true;
-    if(flag){
-        float turn_left  =  min(max(now_speed * (1 - regulator), 0), 255);
-        float turn_right =  min(max(now_speed * (1 + regulator), 0), 255);
-
-        motor(1, turn_left, 1, turn_right);
-
-        if(MOVE_DEBUG){
-            Serial.print(turn_left);
-            Serial.print(' ');
-            Serial.print(turn_right);
-            Serial.print('\n');
+        {
+            sum += weight[i];
+            cnt++;
+        }
+    if(cnt == 0 && now_speed != 0){
+        search(last_dir);
+    }
+    else if(abs(sum) == 4 && cnt == 1 && now_speed != 0){
+        if(sum == -4){
+            search(0);
+            last_dir = 0;
+        }
+        else{
+            last_dir = 1;
+            search(1);
         }
     }
     else{
-        if(hist_error < 0)
-            search(0);
+        float speed_left  =  min(max(now_speed * (1 - regulator), 0), 255);
+        float speed_right =  min(max(now_speed * (1 + regulator), 0), 255);
+
+        if(speed_left > speed_right)
+            last_dir = 0;
         else
-            search(1);
+            last_dir = 1;
+        motor(1, speed_left, 1, speed_right);
+
+        if(MOVE_DEBUG){
+            Serial.print(speed_left);
+            Serial.print(' ');
+            Serial.print(speed_right);
+            Serial.print('\n');
+        }
     }
 }
 
@@ -184,6 +203,7 @@ float string_to_float(String st, int beg = 0){
 
 void interface(){
     if(Serial.available()){
+        motor(0, 0, 0, 0);
         input = Serial.readString();
         switch (input[0])
         { 
@@ -194,7 +214,7 @@ void interface(){
                 kp -= 0.1;
             else
                 kp = string_to_float(input, 1);
-            bt.println(kp);
+            Serial.println(kp);
             break;
         case 'd':
             if(input[1] == '+')
@@ -203,7 +223,7 @@ void interface(){
                 kd -= 0.1;
             else
                 kd = string_to_float(input, 1);
-            bt.println(kd);
+            Serial.println(kd);
             break;
         case 'i':
             if(input[1] == '+')
@@ -212,16 +232,18 @@ void interface(){
                 ki -= 0.1;
             else
                 ki = string_to_float(input, 1);
-            bt.println(ki);
+            Serial.println(ki);
             break;
         case 's':
             if(input[1] == '+')
-                speed += 0.1;
+                speed += 5;
             else if(input[1] == '-')
-                speed -= 0.1;
+                speed -= 5;
             else
                 speed = string_to_float(input, 1);
-            bt.println(speed);
+            if(now_speed != 0)
+                now_speed = speed;
+            Serial.println(speed);
             break;
         case 'c':
             if(now_speed == 0)
@@ -254,6 +276,22 @@ void interface(){
             Serial.print(' ');
             Serial.print(speed);
             Serial.print('\n');
+            break;
+        case 'f':
+            search(last_dir);
+            break;
+        #ifdef ENABLE_EEPROM
+        case 'l':
+            int addr = 0;
+            EEPROM.put(addr, kp);
+            addr += sizeof(kp);
+            EEPROM.put(addr, kd);
+            addr += sizeof(kd);
+            EEPROM.put(addr, ki);
+            addr += sizeof(ki);
+            EEPROM.put(addr, speed);
+            break;
+        #endif
         default:
             break;
         }
@@ -272,13 +310,21 @@ void setup()
     Serial.begin(9600);
 
     #ifdef ENABLE_EEPROM
-    
+    int addr = 0;
+    EEPROM.get(addr, kp);
+    addr += sizeof(kp);
+    EEPROM.get(addr, kd);
+    addr += sizeof(kd);
+    EEPROM.get(addr, ki);
+    addr += sizeof(ki);
+    EEPROM.get(addr, speed);
     #endif
 
     #ifdef ACTIVE_BOTTOM
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     while (digitalRead(BUTTON_PIN));
     #endif
+    now_speed = 0;
 }
 
 float braking_cof = 0.0;
